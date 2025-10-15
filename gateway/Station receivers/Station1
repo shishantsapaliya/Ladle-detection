@@ -1,1 +1,38 @@
 
+#include <WiFi.h>
+#include <esp_now.h>
+#define LOCATION 'Y'
+#define ESP8266_TX 17   // ESP32 TX -> ESP8266 RX
+#define ESP8266_RX 16   // ESP32 RX -> ESP8266 TX
+HardwareSerial espSerial(2);
+
+typedef struct struct_message {
+  char id[20];
+  float temperature;
+} struct_message;
+
+struct_message incomingData;
+
+void OnDataRecv(const uint8_t *mac, const uint8_t *incomingDataBuffer, int len) {
+  memcpy(&incomingData, incomingDataBuffer, sizeof(incomingData));
+  String line = String(incomingData.id) + "," + String(incomingData.temperature, 2) + "," + LOCATION;
+  Serial.println(line);
+  espSerial.println(line);
+}
+
+void setup() {
+  Serial.begin(115200);
+  espSerial.begin(9600, SERIAL_8N1, ESP8266_RX, ESP8266_TX);
+  // Set ESP32 as Wi-Fi Station (required by ESP-NOW)
+  WiFi.mode(WIFI_STA);
+  if (esp_now_init() != ESP_OK) {
+    Serial.println("❌ ESP-NOW initialization failed!");
+    return;
+  }
+  esp_now_register_recv_cb(OnDataRecv);
+  Serial.print("✅ Receiver Ready at Location: ");
+  Serial.println(LOCATION);
+}
+void loop() {
+  // All data handling is in callback
+}
