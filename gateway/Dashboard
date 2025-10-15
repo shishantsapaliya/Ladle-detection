@@ -1,0 +1,81 @@
+#include <ESP8266WiFi.h>
+#include <ESP8266WebServer.h>
+#include <SoftwareSerial.h>
+const char* ssid = "";
+const char* password = "";
+// RX pins for ESP32 Receivers
+#define RX_X 3
+#define RX_Y 13
+SoftwareSerial softSerialX(RX_X, -1); // RX only
+SoftwareSerial softSerialY(RX_Y, -1); // RX only
+ESP8266WebServer server(80);
+struct DataEntry {
+  String id;
+  float temp;
+  char location;
+  String time;
+};
+DataEntry latestX = {"-", 0.0, 'X', "-"};
+DataEntry latestY = {"-", 0.0, 'Y', "-"};
+String generateHTML() {
+  String html = "<!DOCTYPE html><html><head><meta http-equiv='refresh' content='2'>";
+  html += "<title>ESP8266 Receiver Data</title><style>";
+  html += "body{font-family:Arial;text-align:center;background:#f9f9f9;}";
+  html += "table{margin:auto;border-collapse:collapse;width:80%;}";
+  html += "th,td{border:1px solid #777;padding:10px;}";
+  html += "th{background:#4CAF50;color:white;}";
+  html += "tr:nth-child(even){background:#e6ffe6;}";
+  html += "</style></head><body>";
+  html += "<h2>📡 ESP8266 Live Receiver Data</h2>";
+  html += "<table><tr><th>Receiver</th><th>ID</th><th>Temperature (°C)</th><th>Time</th></tr>";
+  html += "<tr><td>Receiver X</td><td>" + latestX.id + "</td><td>" + String(latestX.temp, 2) + "</td><td>" + latestX.time + "</td></tr>";
+  html += "<tr><td>Receiver Y</td><td>" + latestY.id + "</td><td>" + String(latestY.temp, 2) + "</td><td>" + latestY.time + "</td></tr>";
+  html += "</table>";
+  html += "<p>Last refresh: " + String(millis()/1000) + " sec</p>";
+  html += "</body></html>";
+  return html;
+}
+void handleRoot() { server.send(200, "text/html", generateHTML()); }
+void parseDataLine(String line) {
+  line.trim();
+  int firstComma = line.indexOf(',');
+  int secondComma = line.lastIndexOf(',');
+  if(firstComma == -1 || secondComma == -1) return;
+  String id = line.substring(0, firstComma);
+  float temp = line.substring(firstComma + 1, secondComma).toFloat();
+  char loc = line.charAt(secondComma + 1);
+  unsigned long seconds = millis() / 1000;
+  unsigned int mins = (seconds / 60) % 60;
+  unsigned int hrs = (seconds / 3600);
+  String time = String(hrs) + ":" + String(mins) + ":" + String(seconds % 60);
+  if(loc == 'X') latestX = {id, temp, loc, time};
+  else if(loc == 'Y') latestY = {id, temp, loc, time};
+  Serial.println("✅ Parsed: " + line);
+}
+void setup() {
+  Serial.begin(9600);   // Debug only
+  softSerialX.begin(9600);
+  softSerialY.begin(9600);
+  Serial.println("📶 Connecting WiFi...");
+  WiFi.begin(ssid, password);
+  while(WiFi.status() != WL_CONNECTED) { delay(500); Serial.print("."); }
+  Serial.println("\n✅ Connected! IP: " + WiFi.localIP().toString());
+  server.on("/", handleRoot);
+  server.begin();
+  Serial.println("✅ Web Server started!");
+}
+void loop() {
+  static String bufferX = "";
+  while(softSerialX.available()) {
+    char c = softSerialX.read();
+    if(c == '\n') { parseDataLine(bufferX); bufferX = ""; }
+    else bufferX += c;
+  }
+  static String bufferY = "";
+  while(softSerialY.available()) {
+    char c = softSerialY.read();
+    if(c == '\n') { parseDataLine(bufferY); bufferY = ""; }
+    else bufferY += c;
+  }
+  server.handleClient();
+}
